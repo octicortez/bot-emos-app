@@ -147,13 +147,20 @@ if archivo_subido is not None:
         try:
             texto_estado.text("Iniciando navegador en el servidor...")
             chrome_options = Options()
-            chrome_options.add_argument("--headless=new") # Oculto para el servidor
-            chrome_options.add_argument("--no-sandbox") # Obligatorio en Linux
-            chrome_options.add_argument("--disable-dev-shm-usage") # Evita que se quede sin memoria
+            
+            # 1. Le decimos exactamente dónde está instalado Chrome en el servidor Linux
+            chrome_options.binary_location = "/usr/bin/chromium"
+            
+            chrome_options.add_argument("--headless=new") 
+            chrome_options.add_argument("--no-sandbox") 
+            chrome_options.add_argument("--disable-dev-shm-usage") 
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-gpu")
             
-            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+            # 2. Le decimos que use el conductor local en vez de descargarlo
+            servicio = Service("/usr/bin/chromedriver")
+            driver = webdriver.Chrome(service=servicio, options=chrome_options)
+            
             wait = WebDriverWait(driver, 10)
             
             total_filas = len(df_propiedades)
