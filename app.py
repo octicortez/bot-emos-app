@@ -5,6 +5,8 @@ import os
 import urllib.request
 import ssl
 import shutil
+import glob
+from pypdf import PdfWriter
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -134,80 +136,103 @@ if archivo_subido is not None:
     st.dataframe(df_propiedades)
     st.divider()
     
+    # --- LA MEMORIA DEL BOT ---
+    # Le enseñamos a recordar si ya terminó el trabajo para no borrar los botones
+    if "proceso_terminado" not in st.session_state:
+        st.session_state.proceso_terminado = False
+
+    # --- EL BOTÓN MÁGICO ---
     if st.button("🚀 Buscar Boletas y Descargar PDFs", use_container_width=True):
         
         carpeta_temp = "Boletas_Temporales"
         os.makedirs(carpeta_temp, exist_ok=True)
         resultados = []
-        
-        # Barra de progreso visual
         barra_progreso = st.progress(0)
         texto_estado = st.empty()
         
         try:
-            texto_estado.text("Iniciando navegador en el servidor...")
+            texto_estado.text("Iniciando navegador...")
             chrome_options = Options()
-            
-            # 1. Le decimos exactamente dónde está instalado Chrome en el servidor Linux
-            chrome_options.binary_location = "/usr/bin/chromium"
-            
-            chrome_options.add_argument("--headless=new") 
-            chrome_options.add_argument("--no-sandbox") 
-            chrome_options.add_argument("--disable-dev-shm-usage") 
             chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--disable-gpu")
             
-            # 2. Le decimos que use el conductor local en vez de descargarlo
-            servicio = Service("/usr/bin/chromedriver")
+            # Detector Inteligente (Nube vs Mac)
+            if os.path.exists("/usr/bin/chromium"):
+                chrome_options.binary_location = "/usr/bin/chromium"
+                chrome_options.add_argument("--headless=new") 
+                chrome_options.add_argument("--no-sandbox") 
+                chrome_options.add_argument("--disable-dev-shm-usage") 
+                chrome_options.add_argument("--disable-gpu")
+                servicio = Service("/usr/bin/chromedriver")
+            else:
+                chrome_options.add_argument("--headless=new")
+                servicio = Service(ChromeDriverManager().install())
+                
             driver = webdriver.Chrome(service=servicio, options=chrome_options)
-            
             wait = WebDriverWait(driver, 10)
-            
             total_filas = len(df_propiedades)
             
             for index, row in df_propiedades.iterrows():
                 nomenclatura = row.iloc[0]
                 periodo = row.iloc[1]
-                
                 if pd.isna(nomenclatura) or pd.isna(periodo):
                     continue
-                
                 texto_estado.text(f"Consultando: {nomenclatura} ({index + 1}/{total_filas})...")
                 resultado = consultar_propiedad(driver, wait, nomenclatura, periodo, carpeta_temp)
                 resultados.append(resultado)
-                
-                # Actualizar barra
-                progreso_actual = int(((index + 1) / total_filas) * 100)
-                barra_progreso.progress(progreso_actual)
+                barra_progreso.progress(int(((index + 1) / total_filas) * 100))
 
             driver.quit()
             
-            # Guardar el Excel de resultados en la misma carpeta temporal
+            # 1. Guardar el Excel de resultados (Adentro y afuera de la carpeta temporal)
             df_resultados = pd.DataFrame(resultados)
-            ruta_excel = os.path.join(carpeta_temp, "Reporte_Resultados.xlsx")
-            df_resultados.to_excel(ruta_excel, index=False)
+            df_resultados.to_excel(os.path.join(carpeta_temp, "Reporte_Resultados.xlsx"), index=False)
+            df_resultados.to_excel("Reporte_Resultados_Final.xlsx", index=False) # Copia segura afuera
             
-            # Comprimir todo en un archivo ZIP
-            texto_estado.text("Empaquetando archivos...")
+            # 2. Crear el PDF Maestro
+            texto_estado.text("Uniendo todas las boletas para imprimir...")
+            archivos_pdf = glob.glob(os.path.join(carpeta_temp, "*.pdf"))
+            if archivos_pdf:
+                fusionador = PdfWriter()
+                for pdf_path in archivos_pdf:
+                    fusionador.append(pdf_path)
+                fusionador.write("Boletas_Unidas_Para_Imprimir.pdf")
+                fusionador.close()
+            
+            # 3. Comprimir todo en un archivo ZIP
+            texto_estado.text("Empaquetando archivos finales...")
             shutil.make_archive("Boletas_EMOS", 'zip', carpeta_temp)
             
-            st.success("✅ ¡Proceso terminado con éxito!")
-            texto_estado.empty() # Borramos el texto de carga
-            
-            # Mostrar botón de descarga del ZIP
-            with open("Boletas_EMOS.zip", "rb") as f:
-                st.download_button(
-                    label="📥 Descargar Reporte y PDFs (.ZIP)",
-                    data=f,
-                    file_name="Boletas_EMOS_Terminadas.zip",
-                    mime="application/zip",
-                    use_container_width=True
-                )
-                
-        except Exception as e:
-            st.error(f"Ocurrió un error inesperado: {e}")
-            
-        finally:
-            # Limpieza: borramos la carpeta temporal para no llenar el disco
+            # Limpieza de la carpeta temporal
             if os.path.exists(carpeta_temp):
                 shutil.rmtree(carpeta_temp)
+                
+            texto_estado.empty()
+            
+            # ¡Activamos la memoria! El bot recordará que ya terminó.
+            st.session_state.proceso_terminado = True
+            
+        except Exception as e:
+            st.error(f"Ocurrió un error inesperado: {e}")
+
+    # --- LOS BOTONES DE DESCARGA PERMANENTES ---
+    # Como están afuera del botón "Buscar", nunca van a desaparecer
+    if st.session_state.proceso_terminado:
+        st.success("✅ ¡Proceso terminado con éxito!")
+        st.info("Tus archivos están listos. Haz clic en cualquiera de los botones, no desaparecerán:")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if os.path.exists("Boletas_EMOS.zip"):
+                with open("Boletas_EMOS.zip", "rb") as f_zip:
+                    st.download_button("📦 Bajar Todo (.ZIP)", data=f_zip, file_name="Boletas_EMOS_Terminadas.zip", mime="application/zip", use_container_width=True)
+                    
+        with col2:
+            if os.path.exists("Boletas_Unidas_Para_Imprimir.pdf"):
+                with open("Boletas_Unidas_Para_Imprimir.pdf", "rb") as f_pdf:
+                    st.download_button("🖨️ Bajar PDF Unido", data=f_pdf, file_name="Boletas_Para_Imprimir.pdf", mime="application/pdf", use_container_width=True)
+                    
+        with col3:
+            if os.path.exists("Reporte_Resultados_Final.xlsx"):
+                with open("Reporte_Resultados_Final.xlsx", "rb") as f_xls:
+                    st.download_button("📊 Bajar Solo Excel", data=f_xls, file_name="Reporte_Resultados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
