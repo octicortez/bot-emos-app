@@ -6,6 +6,7 @@ import urllib.request
 import ssl
 import shutil
 import glob
+import datetime
 from pypdf import PdfWriter
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -13,19 +14,21 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 
-# --- 1.  IDs DE EMOS 
+# --- 1. TUS IDs DE EMOS (¡REEMPLAZA ESTO CON TUS DATOS!) ---
 ID_CASILLERO_1 = "vCIRNUME"   
 ID_CASILLERO_2 = "vSCCNUME"   
 ID_CASILLERO_3 = "vMZANUME"   
 ID_CASILLERO_4 = "vPARNUME"   
 ID_CASILLERO_5 = "vPHONUME"   
-ID_BOTON_BUSCAR_ABAJO = "BUTTON1" 
+ID_BOTON_BUSCAR_ABAJO = "BUTTON1"  
 ID_BOTON_IMPRIMIR_BOLETA = "BUTTON1"
+ID_FECHA_ACTUALIZACION = "vFECHAACTUALIZACION"
 
 # --- FUNCIÓN DEL BOT (El Cerebro) ---
-def consultar_propiedad(driver, wait, nomenclatura, periodo_buscado, carpeta_destino):
+def consultar_propiedad(driver, wait, nomenclatura, periodo_buscado, carpeta_destino, fecha_pago_str):
     partes = str(nomenclatura).split("-")
     if len(partes) != 5:
         return {"Nomenclatura": nomenclatura, "Periodo": periodo_buscado, "Importe Total": "-", "Vencimiento": "-", "Estado": "Formato Incorrecto"}
@@ -43,7 +46,7 @@ def consultar_propiedad(driver, wait, nomenclatura, periodo_buscado, carpeta_des
         driver.get("https://emosvirtual.riocuarto.gov.ar:9090/emosweb/servlet/com.emosweb.login")
         time.sleep(3) 
         
-        # Escritura
+        # 1. Escribir Nomenclatura
         c1 = wait.until(EC.presence_of_element_located((By.ID, ID_CASILLERO_1)))
         c1.clear(); c1.send_keys(partes[0]); time.sleep(0.5)
         c2 = driver.find_element(By.ID, ID_CASILLERO_2)
@@ -59,6 +62,36 @@ def consultar_propiedad(driver, wait, nomenclatura, periodo_buscado, carpeta_des
         driver.execute_script("arguments[0].click();", boton_buscar)
         time.sleep(5) 
         
+        # --- NUEVO: ACTUALIZAR LA FECHA DE PAGO (VERSIÓN DEFINITIVA) ---
+        try:
+            # 1. Encontrar el casillero de la fecha
+            casillero_fecha = wait.until(EC.element_to_be_clickable((By.ID, ID_FECHA_ACTUALIZACION)))
+            
+            # 2. Hacer clic y borrar el contenido "a lo bruto" (10 veces backspace por las dudas)
+            casillero_fecha.click()
+            time.sleep(0.5)
+            casillero_fecha.send_keys(Keys.END)
+            for _ in range(10):
+                casillero_fecha.send_keys(Keys.BACKSPACE)
+            time.sleep(0.5)
+            
+            # 3. Escribir la nueva fecha con formato dd/mm/yy (ej: 20/03/26)
+            casillero_fecha.send_keys(fecha_pago_str)
+            time.sleep(1)
+            
+            # 4. Hacer clic en el botón de Confirmar (BUTTON5)
+            boton_confirmar_fecha = driver.find_element(By.ID, "BUTTON5")
+            driver.execute_script("arguments[0].click();", boton_confirmar_fecha)
+            
+            # 5. Darle tiempo al sistema de EMOS para recalcular la tabla
+            texto_estado.text("Recalculando intereses a la nueva fecha...")
+            time.sleep(6) 
+            
+        except Exception as e:
+            print(f"Advertencia: No se pudo cambiar la fecha. {e}")
+            # Si algo falla aquí, el bot continuará y descargará con la fecha de hoy
+        
+        # 2. Buscar la deuda en la tabla
         filas = driver.find_elements(By.TAG_NAME, "tr")
         
         for fila in filas:
@@ -70,7 +103,6 @@ def consultar_propiedad(driver, wait, nomenclatura, periodo_buscado, carpeta_des
                     datos_extraidos["Vencimiento"] = datos[1]
                     datos_extraidos["Estado"] = "IMPAGO, PDF Descargado"
                     
-                    # Tildar casilla y apretar imprimir
                     casilla = fila.find_element(By.TAG_NAME, "input")
                     driver.execute_script("arguments[0].click();", casilla)
                     time.sleep(1)
@@ -79,7 +111,7 @@ def consultar_propiedad(driver, wait, nomenclatura, periodo_buscado, carpeta_des
                     driver.execute_script("arguments[0].click();", boton_imprimir)
                     time.sleep(5) 
                     
-                    # Cazando la ventanita flotante
+                    # 3. Descargar PDF
                     try:
                         cuadritos = driver.find_elements(By.CSS_SELECTOR, "iframe, embed, object")
                         pdf_url = None
@@ -126,22 +158,28 @@ st.title("🤖 Asistente de Boletas EMOS")
 st.markdown("Sube tu archivo Excel con las nomenclaturas y los periodos. El bot buscará las deudas automáticamente y descargará los PDFs.")
 st.divider()
 
+# --- NUEVO: CALENDARIO DE FECHA DE PAGO ---
+st.markdown("### 📅 Configuración de Pago")
+fecha_seleccionada = st.date_input("Selecciona la fecha en la que se realizará el pago:", datetime.date.today())
+# Convertimos la fecha al formato que le gusta a EMOS (02/03/2026)
+fecha_pago_str = fecha_seleccionada.strftime("%d/%m/%y") 
+st.write(f"👉 *Las boletas se generarán con fecha de pago:* **{fecha_pago_str}**")
+st.divider()
+
 archivo_subido = st.file_uploader("Sube tu archivo Excel (ej: lista_propiedades.xlsx)", type=["xlsx"])
+
+# --- LA MEMORIA DEL BOT ---
+if "proceso_terminado" not in st.session_state:
+    st.session_state.proceso_terminado = False
 
 if archivo_subido is not None:
     df_propiedades = pd.read_excel(archivo_subido)
-    df_propiedades.columns = df_propiedades.columns.str.strip() # Limpiamos espacios
+    df_propiedades.columns = df_propiedades.columns.str.strip() 
     
     st.write(f"📄 Se detectaron **{len(df_propiedades)}** propiedades en tu lista:")
     st.dataframe(df_propiedades)
     st.divider()
     
-    # --- LA MEMORIA DEL BOT ---
-    # Le enseñamos a recordar si ya terminó el trabajo para no borrar los botones
-    if "proceso_terminado" not in st.session_state:
-        st.session_state.proceso_terminado = False
-
-    # --- EL BOTÓN MÁGICO ---
     if st.button("🚀 Buscar Boletas y Descargar PDFs", use_container_width=True):
         
         carpeta_temp = "Boletas_Temporales"
@@ -177,16 +215,19 @@ if archivo_subido is not None:
                 if pd.isna(nomenclatura) or pd.isna(periodo):
                     continue
                 texto_estado.text(f"Consultando: {nomenclatura} ({index + 1}/{total_filas})...")
-                resultado = consultar_propiedad(driver, wait, nomenclatura, periodo, carpeta_temp)
+                
+                # Le pasamos la nueva fecha al bot
+                resultado = consultar_propiedad(driver, wait, nomenclatura, periodo, carpeta_temp, fecha_pago_str)
                 resultados.append(resultado)
+                
                 barra_progreso.progress(int(((index + 1) / total_filas) * 100))
 
             driver.quit()
             
-            # 1. Guardar el Excel de resultados (Adentro y afuera de la carpeta temporal)
+            # 1. Guardar el Excel
             df_resultados = pd.DataFrame(resultados)
             df_resultados.to_excel(os.path.join(carpeta_temp, "Reporte_Resultados.xlsx"), index=False)
-            df_resultados.to_excel("Reporte_Resultados_Final.xlsx", index=False) # Copia segura afuera
+            df_resultados.to_excel("Reporte_Resultados_Final.xlsx", index=False) 
             
             # 2. Crear el PDF Maestro
             texto_estado.text("Uniendo todas las boletas para imprimir...")
@@ -198,41 +239,40 @@ if archivo_subido is not None:
                 fusionador.write("Boletas_Unidas_Para_Imprimir.pdf")
                 fusionador.close()
             
-            # 3. Comprimir todo en un archivo ZIP
+            # 3. Comprimir todo
             texto_estado.text("Empaquetando archivos finales...")
             shutil.make_archive("Boletas_EMOS", 'zip', carpeta_temp)
             
-            # Limpieza de la carpeta temporal
+            # Limpieza
             if os.path.exists(carpeta_temp):
                 shutil.rmtree(carpeta_temp)
                 
             texto_estado.empty()
             
-            # ¡Activamos la memoria! El bot recordará que ya terminó.
+            # ¡Activamos la memoria!
             st.session_state.proceso_terminado = True
             
         except Exception as e:
             st.error(f"Ocurrió un error inesperado: {e}")
 
-    # --- LOS BOTONES DE DESCARGA PERMANENTES ---
-    # Como están afuera del botón "Buscar", nunca van a desaparecer
-    if st.session_state.proceso_terminado:
-        st.success("✅ ¡Proceso terminado con éxito!")
-        st.info("Tus archivos están listos. Haz clic en cualquiera de los botones, no desaparecerán:")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if os.path.exists("Boletas_EMOS.zip"):
-                with open("Boletas_EMOS.zip", "rb") as f_zip:
-                    st.download_button("📦 Bajar Todo (.ZIP)", data=f_zip, file_name="Boletas_EMOS_Terminadas.zip", mime="application/zip", use_container_width=True)
-                    
-        with col2:
-            if os.path.exists("Boletas_Unidas_Para_Imprimir.pdf"):
-                with open("Boletas_Unidas_Para_Imprimir.pdf", "rb") as f_pdf:
-                    st.download_button("🖨️ Bajar PDF Unido", data=f_pdf, file_name="Boletas_Para_Imprimir.pdf", mime="application/pdf", use_container_width=True)
-                    
-        with col3:
-            if os.path.exists("Reporte_Resultados_Final.xlsx"):
-                with open("Reporte_Resultados_Final.xlsx", "rb") as f_xls:
-                    st.download_button("📊 Bajar Solo Excel", data=f_xls, file_name="Reporte_Resultados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+# --- LOS BOTONES DE DESCARGA PERMANENTES ---
+if st.session_state.proceso_terminado:
+    st.success("✅ ¡Proceso terminado con éxito!")
+    st.info("Tus archivos están listos. Haz clic en cualquiera de los botones, no desaparecerán:")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if os.path.exists("Boletas_EMOS.zip"):
+            with open("Boletas_EMOS.zip", "rb") as f_zip:
+                st.download_button("📦 Bajar Todo (.ZIP)", data=f_zip, file_name="Boletas_EMOS_Terminadas.zip", mime="application/zip", use_container_width=True)
+                
+    with col2:
+        if os.path.exists("Boletas_Unidas_Para_Imprimir.pdf"):
+            with open("Boletas_Unidas_Para_Imprimir.pdf", "rb") as f_pdf:
+                st.download_button("🖨️ Bajar PDF Unido", data=f_pdf, file_name="Boletas_Para_Imprimir.pdf", mime="application/pdf", use_container_width=True)
+                
+    with col3:
+        if os.path.exists("Reporte_Resultados_Final.xlsx"):
+            with open("Reporte_Resultados_Final.xlsx", "rb") as f_xls:
+                st.download_button("📊 Bajar Solo Excel", data=f_xls, file_name="Reporte_Resultados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
