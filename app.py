@@ -22,13 +22,13 @@ from webdriver_manager.chrome import ChromeDriverManager
 # --- 1. CONFIGURACIÓN DE IDs ---
 # ==========================================
 
-# --- TUS IDs DE EMOS (¡REEMPLAZA ESTO CON TUS DATOS!) ---
-ID_CASILLERO_1_EMOS = "vCIRNUME"   
-ID_CASILLERO_2_EMOS = "vSCCNUME"   
-ID_CASILLERO_3_EMOS = "vMZANUME"   
-ID_CASILLERO_4_EMOS = "vPARNUME"   
-ID_CASILLERO_5_EMOS = "vPHONUME"   
-ID_BOTON_BUSCAR_EMOS = "BUTTON1"  
+# --- TUS IDs DE EMOS (¡REEMPLAZA SOLO EL TEXTO ADENTRO DE LAS COMILLAS!) ---
+ID_CASILLERO_1_EMOS = "ID_DEL_CASILLERO_1"   
+ID_CASILLERO_2_EMOS = "ID_DEL_CASILLERO_2"   
+ID_CASILLERO_3_EMOS = "ID_DEL_CASILLERO_3"   
+ID_CASILLERO_4_EMOS = "ID_DEL_CASILLERO_4"   
+ID_CASILLERO_5_EMOS = "ID_DEL_CASILLERO_5"   
+ID_BOTON_BUSCAR_EMOS = "ID_DEL_BOTON_BUSCAR"  
 ID_BOTON_IMPRIMIR_EMOS = "BUTTON1"
 ID_FECHA_ACTUALIZACION_EMOS = "vFECHAACTUALIZACION"
 
@@ -50,7 +50,6 @@ ID_IMPRIMIR_MUNI = "IMPRIMIR"
 # ==========================================
 
 def consultar_emos(driver, wait, nomenclatura, periodo_buscado, carpeta_destino, fecha_pago_obj):
-    # EMOS necesita el año corto (ej: 20/03/26)
     fecha_pago_str = fecha_pago_obj.strftime("%d/%m/%y")
     partes = str(nomenclatura).split("-")
     
@@ -63,7 +62,7 @@ def consultar_emos(driver, wait, nomenclatura, periodo_buscado, carpeta_destino,
     }
 
     if len(partes) != 5:
-        datos_extraidos["Estado"] = "Formato Incorrecto"
+        datos_extraidos["Estado"] = "Formato Incorrecto (Faltan guiones)"
         return datos_extraidos
 
     try:
@@ -71,7 +70,6 @@ def consultar_emos(driver, wait, nomenclatura, periodo_buscado, carpeta_destino,
         driver.get("https://emosvirtual.riocuarto.gov.ar:9090/emosweb/servlet/com.emosweb.login")
         time.sleep(3) 
         
-        # Ingresar Nomenclatura
         c1 = wait.until(EC.presence_of_element_located((By.ID, ID_CASILLERO_1_EMOS)))
         c1.clear(); c1.send_keys(partes[0]); time.sleep(0.5)
         c2 = driver.find_element(By.ID, ID_CASILLERO_2_EMOS)
@@ -87,7 +85,6 @@ def consultar_emos(driver, wait, nomenclatura, periodo_buscado, carpeta_destino,
         driver.execute_script("arguments[0].click();", boton_buscar)
         time.sleep(5) 
         
-        # Actualizar Fecha EMOS
         try:
             casillero_fecha = wait.until(EC.element_to_be_clickable((By.ID, ID_FECHA_ACTUALIZACION_EMOS)))
             casillero_fecha.click()
@@ -103,7 +100,6 @@ def consultar_emos(driver, wait, nomenclatura, periodo_buscado, carpeta_destino,
         except Exception as e:
             print(f"Advertencia: No se pudo cambiar la fecha en EMOS. {e}")
         
-        # Buscar la deuda y descargar
         filas = driver.find_elements(By.TAG_NAME, "tr")
         for fila in filas:
             texto_fila = fila.text.strip()
@@ -154,12 +150,11 @@ def consultar_emos(driver, wait, nomenclatura, periodo_buscado, carpeta_destino,
         return datos_extraidos
 
     except Exception as e:
-        datos_extraidos["Estado"] = f"ERROR TÉCNICO"
+        datos_extraidos["Estado"] = f"Error: {str(e)[:50]}..." 
         return datos_extraidos
 
 
 def consultar_muni(driver, wait, nomenclatura, carpeta_destino, fecha_pago_obj):
-    # MUNI necesita el año largo (ej: 20/03/2026)
     fecha_pago_str = fecha_pago_obj.strftime("%d/%m/%Y")
     partes = str(nomenclatura).split("-")
     
@@ -180,7 +175,6 @@ def consultar_muni(driver, wait, nomenclatura, carpeta_destino, fecha_pago_obj):
         driver.get("https://app.riocuarto.gov.ar:8443/gestiontributaria/servlet/com.recursos.hceduimpmul?Inmo")
         time.sleep(2) 
 
-        # Ingresar Nomenclatura
         c1 = wait.until(EC.presence_of_element_located((By.ID, ID_C1_MUNI)))
         c1.clear(); c1.send_keys(partes[0]); time.sleep(0.5)
         c2 = driver.find_element(By.ID, ID_C2_MUNI)
@@ -192,7 +186,6 @@ def consultar_muni(driver, wait, nomenclatura, carpeta_destino, fecha_pago_obj):
         c5 = driver.find_element(By.ID, ID_C5_MUNI)
         c5.clear(); c5.send_keys(partes[4]); time.sleep(1)
 
-        # Configurar Fecha
         casillero_fecha = driver.find_element(By.ID, ID_FECHA_MUNI)
         casillero_fecha.click()
         time.sleep(0.5)
@@ -202,23 +195,19 @@ def consultar_muni(driver, wait, nomenclatura, carpeta_destino, fecha_pago_obj):
         casillero_fecha.send_keys(fecha_pago_str)
         time.sleep(1)
 
-        # Buscar
         boton_buscar = driver.find_element(By.ID, ID_BUSCAR_MUNI)
         driver.execute_script("arguments[0].click();", boton_buscar)
 
-        # Seleccionar todo y leer total
         try:
             checkbox_todas = wait.until(EC.element_to_be_clickable((By.ID, ID_CHECKALL_MUNI)))
             driver.execute_script("arguments[0].click();", checkbox_todas)
             time.sleep(1)
-            
             elemento_total = driver.find_element(By.ID, ID_TOTAL_MUNI)
             datos_extraidos["Importe Total"] = elemento_total.text.strip()
         except:
             datos_extraidos["Estado"] = "No se encontraron deudas para seleccionar"
             return datos_extraidos
 
-        # Generar e imprimir
         boton_boleta = driver.find_element(By.ID, ID_BOLETA_MUNI)
         driver.execute_script("arguments[0].click();", boton_boleta)
         
@@ -226,7 +215,6 @@ def consultar_muni(driver, wait, nomenclatura, carpeta_destino, fecha_pago_obj):
         driver.execute_script("arguments[0].click();", boton_imprimir)
         time.sleep(5) 
 
-        # Descarga Ninja JS
         cuadritos = driver.find_elements(By.CSS_SELECTOR, "iframe, embed, object")
         pdf_url = None
         for cuadrito in cuadritos:
@@ -268,7 +256,7 @@ def consultar_muni(driver, wait, nomenclatura, carpeta_destino, fecha_pago_obj):
         return datos_extraidos
 
     except Exception as e:
-        datos_extraidos["Estado"] = f"ERROR TÉCNICO"
+        datos_extraidos["Estado"] = f"Error: {str(e)[:50]}..."
         return datos_extraidos
 
 
@@ -282,7 +270,6 @@ st.title("🧾 Gestor Automático de Impuestos")
 st.markdown("Central de descargas para boletas de propiedades.")
 st.divider()
 
-# --- SELECTOR DE OPCIÓN B ---
 tipo_impuesto = st.selectbox(
     "¿Qué impuesto deseas consultar hoy?", 
     ["💧 EMOS (Agua y Cloacas)", "🏛️ Municipalidad (Contribución Inmobiliaria)"]
@@ -306,7 +293,6 @@ else:
 
 archivo_subido = st.file_uploader(f"Sube tu archivo Excel para {tipo_impuesto}", type=["xlsx"])
 
-# --- LA MEMORIA DEL BOT ---
 if "proceso_terminado" not in st.session_state:
     st.session_state.proceso_terminado = False
 
@@ -320,8 +306,24 @@ if archivo_subido is not None:
     
     if st.button(f"🚀 Iniciar Búsqueda en {tipo_impuesto}", use_container_width=True):
         
+        # 1. LIMPIEZA EXTREMA AL INICIO
         carpeta_temp = "Boletas_Temporales"
+        if os.path.exists(carpeta_temp):
+            try:
+                shutil.rmtree(carpeta_temp)
+            except Exception:
+                pass # Si no puede borrarla, seguimos sin frenar
+                
         os.makedirs(carpeta_temp, exist_ok=True)
+        
+        archivos_viejos = ["Boletas_Finales.zip", "Boletas_Unidas.pdf"] + glob.glob("Reporte_*.xlsx")
+        for f_viejo in archivos_viejos:
+            if os.path.exists(f_viejo):
+                try:
+                    os.remove(f_viejo)
+                except Exception:
+                    pass
+                    
         resultados = []
         barra_progreso = st.progress(0)
         texto_estado = st.empty()
@@ -331,7 +333,6 @@ if archivo_subido is not None:
             chrome_options = Options()
             chrome_options.add_argument("--window-size=1920,1080")
             
-            # Detector Inteligente (Nube vs Mac)
             if os.path.exists("/usr/bin/chromium"):
                 chrome_options.binary_location = "/usr/bin/chromium"
                 chrome_options.add_argument("--headless=new") 
@@ -358,7 +359,6 @@ if archivo_subido is not None:
                     
                 texto_estado.text(f"Consultando: {nomenclatura} ({index + 1}/{total_filas})...")
                 
-                # Desvío de tráfico según la opción elegida
                 if es_emos:
                     resultado = consultar_emos(driver, wait, nomenclatura, periodo, carpeta_temp, fecha_seleccionada)
                 else:
@@ -369,13 +369,12 @@ if archivo_subido is not None:
 
             driver.quit()
             
-            # 1. Guardar el Excel
+            # Guardamos el Excel
             df_resultados = pd.DataFrame(resultados)
             nombre_excel = f"Reporte_{'EMOS' if es_emos else 'MUNI'}.xlsx"
             df_resultados.to_excel(os.path.join(carpeta_temp, nombre_excel), index=False)
             df_resultados.to_excel(nombre_excel, index=False) 
             
-            # 2. Crear el PDF Maestro
             texto_estado.text("Uniendo todas las boletas para imprimir...")
             archivos_pdf = glob.glob(os.path.join(carpeta_temp, "*.pdf"))
             if archivos_pdf:
@@ -385,21 +384,25 @@ if archivo_subido is not None:
                 fusionador.write("Boletas_Unidas.pdf")
                 fusionador.close()
             
-            # 3. Comprimir todo
             texto_estado.text("Empaquetando archivos finales...")
             shutil.make_archive("Boletas_Finales", 'zip', carpeta_temp)
             
-            # Limpieza
+            # ESTO ES CLAVE: Encendemos los botones antes de la limpieza final
+            st.session_state.proceso_terminado = True
+            
+            # Limpieza final suave
             if os.path.exists(carpeta_temp):
-                shutil.rmtree(carpeta_temp)
+                try:
+                    shutil.rmtree(carpeta_temp)
+                except Exception:
+                    pass
                 
             texto_estado.empty()
-            st.session_state.proceso_terminado = True
             
         except Exception as e:
             st.error(f"Ocurrió un error inesperado: {e}")
 
-# --- LOS BOTONES DE DESCARGA PERMANENTES ---
+# --- BOTONES DE DESCARGA ---
 if st.session_state.proceso_terminado:
     st.success("✅ ¡Proceso terminado con éxito!")
     st.info("Tus archivos están listos. Haz clic en cualquiera de los botones:")
@@ -417,7 +420,6 @@ if st.session_state.proceso_terminado:
                 st.download_button("🖨️ Bajar PDF Unido", data=f_pdf, file_name="Boletas_Para_Imprimir.pdf", mime="application/pdf", use_container_width=True)
                 
     with col3:
-        # Busca el excel que se haya generado (EMOS o MUNI)
         archivos_excel = glob.glob("Reporte_*.xlsx")
         if archivos_excel:
             archivo_reciente = max(archivos_excel, key=os.path.getmtime)
